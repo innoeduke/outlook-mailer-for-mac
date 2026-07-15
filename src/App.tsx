@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Papa from 'papaparse';
+import { marked } from 'marked';
 import { 
   Mail, 
   FileSpreadsheet, 
@@ -191,7 +192,7 @@ export default function App() {
   // Preview fields
   const currentPreviewRow = csvRows[previewIndex];
   const renderedSubject = currentPreviewRow ? interpolateTemplate(emailSubject, currentPreviewRow) : '';
-  const renderedBody = currentPreviewRow ? interpolateTemplate(emailBody, currentPreviewRow) : '';
+  const renderedBody = currentPreviewRow ? marked.parse(interpolateTemplate(emailBody, currentPreviewRow)) as string : '';
 
   // Sending Loop
   const sendBatch = async () => {
@@ -230,7 +231,8 @@ export default function App() {
 
       // Prepare template values
       const subject = interpolateTemplate(emailSubject, row);
-      const body = interpolateTemplate(emailBody, row);
+      const rawBody = interpolateTemplate(emailBody, row);
+      const body = marked.parse(rawBody) as string;
 
       addLog('info', `Sending email to ${recipient}...`);
 

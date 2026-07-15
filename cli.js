@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import Papa from 'papaparse';
+import { marked } from 'marked';
 
 // Color codes for CLI output
 const RESET = '\x1b[0m';
@@ -161,7 +162,8 @@ async function run() {
     }
 
     const subject = interpolate(subjectTemplate, row);
-    const body = interpolate(bodyTemplate, row);
+    const rawBody = interpolate(bodyTemplate, row);
+    const body = marked.parse(rawBody);
 
     // Double check Outlook is still open before sending
     const active = await checkOutlookRunning();
