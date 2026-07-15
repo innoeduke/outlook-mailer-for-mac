@@ -47,6 +47,7 @@ export default function App() {
   const [emailSubject, setEmailSubject] = useState<string>('Greetings {{First Name}}!');
   const [emailBody, setEmailBody] = useState<string>(DEFAULT_HTML_BODY);
   const [editorMode, setEditorMode] = useState<'html' | 'markdown'>('html');
+  const [imagesMap, setImagesMap] = useState<Record<string, string>>({});
 
   // Preview Index
   const [previewIndex, setPreviewIndex] = useState<number>(0);
@@ -156,11 +157,12 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
+      setImagesMap(prev => ({ ...prev, [file.name]: dataUrl }));
       const imgTag = currentMode === 'markdown'
-        ? `![${file.name}](${dataUrl})`
-        : `<img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; height: auto; display: block; margin: 1rem 0;" />`;
+        ? `![${file.name}]({{image:${file.name}}})`
+        : `<img src="{{image:${file.name}}}" alt="${file.name}" style="max-width: 100%; height: auto; display: block; margin: 1rem 0;" />`;
       insertTextAtCursor(imgTag);
-      addLog('success', `Inserted image: ${file.name}`);
+      addLog('success', `Uploaded and inserted placeholder for image: ${file.name}`);
     };
     reader.onerror = () => {
       addLog('error', 'Failed to read image file.');
@@ -236,13 +238,23 @@ export default function App() {
     return result;
   };
 
+  const resolveImagePlaceholders = (text: string, map: Record<string, string>): string => {
+    let result = text;
+    Object.entries(map).forEach(([filename, base64Data]) => {
+      const escapedName = filename.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(`{{\\s*image:${escapedName}\\s*}}`, 'gi');
+      result = result.replace(regex, base64Data);
+    });
+    return result;
+  };
+
   // Preview fields
   const currentPreviewRow = csvRows[previewIndex];
   const renderedSubject = currentPreviewRow ? interpolateTemplate(emailSubject, currentPreviewRow) : '';
   const renderedBody = currentPreviewRow 
     ? (editorMode === 'markdown' 
-        ? (marked.parse(interpolateTemplate(emailBody, currentPreviewRow)) as string)
-        : interpolateTemplate(emailBody, currentPreviewRow))
+        ? (marked.parse(resolveImagePlaceholders(interpolateTemplate(emailBody, currentPreviewRow), imagesMap)) as string)
+        : resolveImagePlaceholders(interpolateTemplate(emailBody, currentPreviewRow), imagesMap))
     : '';
 
   // Sending Loop
@@ -283,7 +295,8 @@ export default function App() {
       // Prepare template values
       const subject = interpolateTemplate(emailSubject, row);
       const rawBody = interpolateTemplate(emailBody, row);
-      const body = editorMode === 'markdown' ? (marked.parse(rawBody) as string) : rawBody;
+      const resolvedBody = resolveImagePlaceholders(rawBody, imagesMap);
+      const body = editorMode === 'markdown' ? (marked.parse(resolvedBody) as string) : resolvedBody;
 
       addLog('info', `Sending email to ${recipient}...`);
 
@@ -357,6 +370,7 @@ export default function App() {
     setCsvFile(null);
     setCsvHeaders([]);
     setCsvRows([]);
+    setImagesMap({});
     setLogs([]);
     addLog('info', 'Workspace cleared.');
   };
