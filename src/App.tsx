@@ -44,6 +44,7 @@ export default function App() {
   const [emailBody, setEmailBody] = useState<string>(
     `<p>Dear {{First Name}},</p>\n<p>I hope this email finds you well.</p>\n<p>This is a batch test email sent via Outlook for Mac.</p>\n<p>Best regards,<br>Kyle</p>`
   );
+  const [editorMode, setEditorMode] = useState<'html' | 'markdown'>('html');
 
   // Preview Index
   const [previewIndex, setPreviewIndex] = useState<number>(0);
@@ -144,6 +145,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const currentMode = editorMode;
+
     if (file.size > 2 * 1024 * 1024) {
       addLog('warning', 'Image file is larger than 2MB. Large embedded images might be blocked by some email clients.');
     }
@@ -151,8 +154,10 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
-      const imgHtml = `<img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; height: auto; display: block; margin: 1rem 0;" />`;
-      insertTextAtCursor(imgHtml);
+      const imgTag = currentMode === 'markdown'
+        ? `![${file.name}](${dataUrl})`
+        : `<img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; height: auto; display: block; margin: 1rem 0;" />`;
+      insertTextAtCursor(imgTag);
       addLog('success', `Inserted image: ${file.name}`);
     };
     reader.onerror = () => {
@@ -232,7 +237,11 @@ export default function App() {
   // Preview fields
   const currentPreviewRow = csvRows[previewIndex];
   const renderedSubject = currentPreviewRow ? interpolateTemplate(emailSubject, currentPreviewRow) : '';
-  const renderedBody = currentPreviewRow ? marked.parse(interpolateTemplate(emailBody, currentPreviewRow)) as string : '';
+  const renderedBody = currentPreviewRow 
+    ? (editorMode === 'markdown' 
+        ? (marked.parse(interpolateTemplate(emailBody, currentPreviewRow)) as string)
+        : interpolateTemplate(emailBody, currentPreviewRow))
+    : '';
 
   // Sending Loop
   const sendBatch = async () => {
@@ -272,7 +281,7 @@ export default function App() {
       // Prepare template values
       const subject = interpolateTemplate(emailSubject, row);
       const rawBody = interpolateTemplate(emailBody, row);
-      const body = marked.parse(rawBody) as string;
+      const body = editorMode === 'markdown' ? (marked.parse(rawBody) as string) : rawBody;
 
       addLog('info', `Sending email to ${recipient}...`);
 
@@ -573,13 +582,35 @@ export default function App() {
 
             <div className="form-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <label htmlFor="body-input">Email Body (HTML / Markdown)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <label htmlFor="body-input">Email Body ({editorMode === 'markdown' ? 'Markdown' : 'HTML'})</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  {/* HTML / Markdown Toggler */}
+                  <div style={{ display: 'flex', gap: '0.2rem', background: 'rgba(255,255,255,0.04)', padding: '0.2rem', borderRadius: '0.5rem', border: '1px solid var(--border-light)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setEditorMode('html')}
+                      className={`btn ${editorMode === 'html' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', borderRadius: '0.35rem', boxShadow: 'none' }}
+                      disabled={sendingStatus === 'sending'}
+                    >
+                      HTML
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditorMode('markdown')}
+                      className={`btn ${editorMode === 'markdown' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', borderRadius: '0.35rem', boxShadow: 'none' }}
+                      disabled={sendingStatus === 'sending'}
+                    >
+                      Markdown
+                    </button>
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => document.getElementById('image-uploader')?.click()}
                     className="btn btn-secondary"
-                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: '0.4rem' }}
+                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', borderRadius: '0.4rem' }}
                     disabled={sendingStatus === 'sending'}
                   >
                     🖼️ Insert Image
@@ -591,7 +622,6 @@ export default function App() {
                     onChange={handleImageUpload}
                     style={{ display: 'none' }}
                   />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports HTML & MD</span>
                 </div>
               </div>
               <textarea 

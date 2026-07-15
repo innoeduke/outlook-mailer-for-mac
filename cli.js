@@ -19,14 +19,15 @@ function printUsage() {
 ${BOLD}Outlook Batch Mailer - Command Line Interface${RESET}
 
 ${BOLD}Usage:${RESET}
-  node cli.js --csv <csv-file> --subject "<subject>" --body <body-html-file-or-string> [--delay <seconds>] [--email-col <column-name>]
+  node cli.js --csv <csv-file> --subject "<subject>" --body <body-html-file-or-string> [--delay <seconds>] [--email-col <column-name>] [--mode <html|markdown>]
 
 ${BOLD}Options:${RESET}
   --csv        Path to the contacts CSV file (Required)
   --subject    Subject line. Can contain {{Placeholders}} matching CSV headers (Required)
-  --body       Path to an HTML file OR a raw HTML string. Can contain {{Placeholders}} (Required)
+  --body       Path to an HTML/Markdown file OR a raw template string. Can contain {{Placeholders}} (Required)
   --delay      Time in seconds to wait between emails (Optional, Default: 3)
   --email-col  Exact header name of the recipient email column (Optional, auto-detects if omitted)
+  --mode       Mode for template compilation: 'html' or 'markdown' (Optional, auto-detected by file extension if omitted)
 
 ${BOLD}Examples:${RESET}
   node cli.js --csv contacts.csv --subject "Hello {{First Name}}!" --body template.html --delay 2
@@ -65,6 +66,15 @@ async function run() {
 
   // 1. Resolve Body Template (File or raw String)
   const baseDir = fs.existsSync(bodyInput) ? path.dirname(path.resolve(bodyInput)) : process.cwd();
+  let mode = args.mode;
+  if (!mode) {
+    if (fs.existsSync(bodyInput) && (bodyInput.endsWith('.md') || bodyInput.endsWith('.markdown'))) {
+      mode = 'markdown';
+    } else {
+      mode = 'html';
+    }
+  }
+  console.log(`${BLUE}ℹ Mode set to: ${mode.toUpperCase()}${RESET}`);
   let bodyTemplate = '';
   if (fs.existsSync(bodyInput)) {
     try {
@@ -165,7 +175,7 @@ async function run() {
     const subject = interpolate(subjectTemplate, row);
     let rawBody = interpolate(bodyTemplate, row);
     rawBody = inlineLocalImages(rawBody, baseDir);
-    const body = marked.parse(rawBody);
+    const body = mode === 'markdown' ? marked.parse(rawBody) : rawBody;
 
     // Double check Outlook is still open before sending
     const active = await checkOutlookRunning();
