@@ -122,6 +122,46 @@ export default function App() {
     }
   };
 
+  const insertTextAtCursor = (textToInsert: string) => {
+    const textarea = document.getElementById('body-input') as HTMLTextAreaElement;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const before = text.substring(0, start);
+    const after  = text.substring(end, text.length);
+
+    setEmailBody(before + textToInsert + after);
+    
+    setTimeout(() => {
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = start + textToInsert.length;
+    }, 10);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      addLog('warning', 'Image file is larger than 2MB. Large embedded images might be blocked by some email clients.');
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      const imgHtml = `<img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; height: auto; display: block; margin: 1rem 0;" />`;
+      insertTextAtCursor(imgHtml);
+      addLog('success', `Inserted image: ${file.name}`);
+    };
+    reader.onerror = () => {
+      addLog('error', 'Failed to read image file.');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
@@ -532,9 +572,27 @@ export default function App() {
             </div>
 
             <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label htmlFor="body-input">Email Body (HTML Supported)</label>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Use HTML elements like &lt;p&gt;, &lt;b&gt;, &lt;br&gt;</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <label htmlFor="body-input">Email Body (HTML / Markdown)</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('image-uploader')?.click()}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: '0.4rem' }}
+                    disabled={sendingStatus === 'sending'}
+                  >
+                    🖼️ Insert Image
+                  </button>
+                  <input
+                    type="file"
+                    id="image-uploader"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports HTML & MD</span>
+                </div>
               </div>
               <textarea 
                 id="body-input" 

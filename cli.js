@@ -64,6 +64,7 @@ async function run() {
   }
 
   // 1. Resolve Body Template (File or raw String)
+  const baseDir = fs.existsSync(bodyInput) ? path.dirname(path.resolve(bodyInput)) : process.cwd();
   let bodyTemplate = '';
   if (fs.existsSync(bodyInput)) {
     try {
@@ -162,7 +163,8 @@ async function run() {
     }
 
     const subject = interpolate(subjectTemplate, row);
-    const rawBody = interpolate(bodyTemplate, row);
+    let rawBody = interpolate(bodyTemplate, row);
+    rawBody = inlineLocalImages(rawBody, baseDir);
     const body = marked.parse(rawBody);
 
     // Double check Outlook is still open before sending
@@ -258,6 +260,69 @@ end tell
     child.stdin.write(appleScript);
     child.stdin.end();
   });
+}
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.gif': return 'image/gif';
+    case '.svg': return 'image/svg+xml';
+    case '.webp': return 'image/webp';
+    default: return 'application/octet-stream';
+  }
+}
+
+function inlineLocalImages(htmlContent, baseDir) {
+  let result = htmlContent;
+  const htmlImgRegex = /<img([^>]+)src=["']([^"']+)["']([^>]*)>/g;
+  
+  result = result.replace(htmlImgRegex, (match, prefix, srcPath, suffix) => {
+    if (srcPath.startsWith('http://') || srcPath.startsWith('https://') || srcPath.startsWith('data:')) {
+      return match;
+    }
+    const absolutePath = path.isAbsolute(srcPath) ? srcPath : path.resolve(baseDir, srcPath);
+    if (fs.existsSync(absolutePath)) {
+      try {
+        const fileBuffer = fs.readFileSync(absolutePath);
+        const base64Data = fileBuffer.toString('base64');
+        const mimeType = getMimeType(absolutePath);
+        const dataUrl = `data:${mimeType};base64,${base64Data}`;
+        return `<img${prefix}src="${dataUrl}"${suffix}>`;
+      } catch (err) {
+        console.warn(`\x1b[33m⚠ Could not read local image at ${absolutePath}: ${err.message}\x1b[0m`);
+      }
+    } else {
+      console.warn(`\x1b[33m⚠ Local image not found at: ${absolutePath}\x1b[0m`);
+    }
+    return match;
+  });
+
+  const mdImgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  result = result.replace(mdImgRegex, (match, altText, srcPath) => {
+    if (srcPath.startsWith('http://') || srcPath.startsWith('https://') || srcPath.startsWith('data:')) {
+      return match;
+    }
+    const absolutePath = path.isAbsolute(srcPath) ? srcPath : path.resolve(baseDir, srcPath);
+    if (fs.existsSync(absolutePath)) {
+      try {
+        const fileBuffer = fs.readFileSync(absolutePath);
+        const base64Data = fileBuffer.toString('base64');
+        const mimeType = getMimeType(absolutePath);
+        const dataUrl = `data:${mimeType};base64,${base64Data}`;
+        return `![${altText}](${dataUrl})`;
+      } catch (err) {
+        console.warn(`\x1b[33m⚠ Could not read local image at ${absolutePath}: ${err.message}\x1b[0m`);
+      }
+    } else {
+      console.warn(`\x1b[33m⚠ Local image not found at: ${absolutePath}\x1b[0m`);
+    }
+    return match;
+  });
+
+  return result;
 }
 
 run();
