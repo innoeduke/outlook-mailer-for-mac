@@ -24,6 +24,10 @@ interface LogEntry {
   message: string;
 }
 
+const DEFAULT_HTML_BODY = `<p>Dear {{First Name}},</p>\n<p>I hope this email finds you well.</p>\n<p>This is a batch test email sent via Outlook for Mac.</p>\n<p>Best regards,<br>Kyle</p>`;
+
+const DEFAULT_MARKDOWN_BODY = `Dear {{First Name}},\n\nI hope this email finds you well.\n\nThis is a batch test email sent via Outlook for Mac.\n\nBest regards,\nKyle`;
+
 export default function App() {
   // Outlook Running Status
   const [isOutlookRunning, setIsOutlookRunning] = useState<boolean | null>(null);
@@ -41,9 +45,7 @@ export default function App() {
 
   // Email Template
   const [emailSubject, setEmailSubject] = useState<string>('Greetings {{First Name}}!');
-  const [emailBody, setEmailBody] = useState<string>(
-    `<p>Dear {{First Name}},</p>\n<p>I hope this email finds you well.</p>\n<p>This is a batch test email sent via Outlook for Mac.</p>\n<p>Best regards,<br>Kyle</p>`
-  );
+  const [emailBody, setEmailBody] = useState<string>(DEFAULT_HTML_BODY);
   const [editorMode, setEditorMode] = useState<'html' | 'markdown'>('html');
 
   // Preview Index
@@ -588,7 +590,12 @@ export default function App() {
                   <div style={{ display: 'flex', gap: '0.2rem', background: 'rgba(255,255,255,0.04)', padding: '0.2rem', borderRadius: '0.5rem', border: '1px solid var(--border-light)' }}>
                     <button
                       type="button"
-                      onClick={() => setEditorMode('html')}
+                      onClick={() => {
+                        setEditorMode('html');
+                        if (emailBody.trim() === DEFAULT_MARKDOWN_BODY.trim()) {
+                          setEmailBody(DEFAULT_HTML_BODY);
+                        }
+                      }}
                       className={`btn ${editorMode === 'html' ? 'btn-primary' : 'btn-secondary'}`}
                       style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', borderRadius: '0.35rem', boxShadow: 'none' }}
                       disabled={sendingStatus === 'sending'}
@@ -597,7 +604,12 @@ export default function App() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEditorMode('markdown')}
+                      onClick={() => {
+                        setEditorMode('markdown');
+                        if (emailBody.trim() === DEFAULT_HTML_BODY.trim()) {
+                          setEmailBody(DEFAULT_MARKDOWN_BODY);
+                        }
+                      }}
                       className={`btn ${editorMode === 'markdown' ? 'btn-primary' : 'btn-secondary'}`}
                       style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', borderRadius: '0.35rem', boxShadow: 'none' }}
                       disabled={sendingStatus === 'sending'}
