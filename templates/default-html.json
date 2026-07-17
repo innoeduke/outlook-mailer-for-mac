@@ -1,0 +1,8 @@
+{
+  "id": "default-html",
+  "name": "Default HTML Template",
+  "subject": "Greetings {{First Name}}!",
+  "body": "<p>Dear {{First Name}},</p>\n<p>I hope this email finds you well.</p>\n<p>This is a batch test email sent via Outlook for Mac.</p>\n<p>Best regards,<br>Kyle</p>",
+  "editorMode": "html",
+  "imagesMap": {}
+}

@@ -1,0 +1,8 @@
+{
+  "id": "default-markdown",
+  "name": "Default Markdown Template",
+  "subject": "Greetings {{First Name}}!",
+  "body": "Dear {{First Name}},\n\nI hope this email finds you well.\n\nThis is a batch test email sent via Outlook for Mac.\n\nBest regards,\nKyle",
+  "editorMode": "markdown",
+  "imagesMap": {}
+}

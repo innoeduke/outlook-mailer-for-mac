@@ -7,21 +7,28 @@ import {
   Play, 
   Pause, 
   Square, 
-  RotateCcw, 
   RefreshCw, 
   AlertCircle, 
   CheckCircle2, 
-  Settings, 
   Eye, 
-  HelpCircle,
   Clock,
-  Send
+  Send,
+  Save,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 interface LogEntry {
   timestamp: string;
   type: 'info' | 'success' | 'error' | 'warning';
   message: string;
+}
+
+interface TemplateSummary {
+  id: string;
+  name: string;
+  subject: string;
+  editorMode: 'html' | 'markdown';
 }
 
 const DEFAULT_HTML_BODY = `<p>Dear {{First Name}},</p>\n<p>I hope this email finds you well.</p>\n<p>This is a batch test email sent via Outlook for Mac.</p>\n<p>Best regards,<br>Kyle</p>`;
@@ -48,6 +55,10 @@ export default function App() {
   const [emailBody, setEmailBody] = useState<string>(DEFAULT_HTML_BODY);
   const [editorMode, setEditorMode] = useState<'html' | 'markdown'>('html');
   const [imagesMap, setImagesMap] = useState<Record<string, string>>({});
+
+  // Saved Templates List
+  const [templatesList, setTemplatesList] = useState<TemplateSummary[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
   // Preview Index
   const [previewIndex, setPreviewIndex] = useState<number>(0);
@@ -100,6 +111,143 @@ export default function App() {
     const interval = setInterval(checkOutlookStatus, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch templates list from backend
+  const fetchTemplates = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/templates');
+      if (response.ok) {
+        const data = await response.json();
+        setTemplatesList(data);
+      }
+    } catch (error) {
+      console.error('Failed to contact backend templates endpoint:', error);
+      addLog('error', 'Failed to retrieve saved templates list.');
+    }
+  };
+
+  useEffect(() => {
+    fetchTemplates();
+  }, []);
+
+  const handleLoadTemplate = async (id: string) => {
+    setSelectedTemplateId(id);
+    if (!id) return;
+
+    try {
+      const response = await fetch(`http://localhost:3001/api/templates/${id}`);
+      if (response.ok) {
+        const template = await response.json();
+        setEmailSubject(template.subject);
+        setEmailBody(template.body);
+        setEditorMode(template.editorMode);
+        setImagesMap(template.imagesMap || {});
+        addLog('success', `Loaded template: ${template.name}`);
+      } else {
+        addLog('error', 'Failed to load selected template details.');
+      }
+    } catch (error) {
+      console.error('Error loading template:', error);
+      addLog('error', 'Error loading template details.');
+    }
+  };
+
+  const handleSaveAsNewTemplate = async () => {
+    const name = prompt('Enter a name for the new template:');
+    if (!name) return;
+
+    const newTemplate = {
+      name,
+      subject: emailSubject,
+      body: emailBody,
+      editorMode,
+      imagesMap
+    };
+
+    try {
+      const response = await fetch('http://localhost:3001/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTemplate)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        addLog('success', `Template "${name}" saved successfully.`);
+        await fetchTemplates();
+        setSelectedTemplateId(data.template.id);
+      } else {
+        const errorData = await response.json();
+        addLog('error', `Failed to save template: ${errorData.error}`);
+      }
+    } catch (error) {
+      addLog('error', 'Failed to connect to backend to save template.');
+    }
+  };
+
+  const handleOverwriteTemplate = async () => {
+    if (!selectedTemplateId) return;
+    const currentTemplate = templatesList.find(t => t.id === selectedTemplateId);
+    if (!currentTemplate) return;
+
+    if (!confirm(`Are you sure you want to overwrite template "${currentTemplate.name}" with your current edits?`)) {
+      return;
+    }
+
+    const updatedTemplate = {
+      id: selectedTemplateId,
+      name: currentTemplate.name,
+      subject: emailSubject,
+      body: emailBody,
+      editorMode,
+      imagesMap
+    };
+
+    try {
+      const response = await fetch('http://localhost:3001/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedTemplate)
+      });
+
+      if (response.ok) {
+        addLog('success', `Template "${currentTemplate.name}" updated successfully.`);
+        await fetchTemplates();
+      } else {
+        const errorData = await response.json();
+        addLog('error', `Failed to update template: ${errorData.error}`);
+      }
+    } catch (error) {
+      addLog('error', 'Failed to connect to backend to update template.');
+    }
+  };
+
+  const handleDeleteTemplate = async () => {
+    if (!selectedTemplateId) return;
+    const currentTemplate = templatesList.find(t => t.id === selectedTemplateId);
+    if (!currentTemplate) return;
+
+    if (!confirm(`Are you sure you want to delete template "${currentTemplate.name}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:3001/api/templates/${selectedTemplateId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        addLog('success', `Template "${currentTemplate.name}" deleted.`);
+        setSelectedTemplateId('');
+        await fetchTemplates();
+      } else {
+        const errorData = await response.json();
+        addLog('error', `Failed to delete template: ${errorData.error}`);
+      }
+    } catch (error) {
+      addLog('error', 'Failed to connect to backend to delete template.');
+    }
+  };
 
   // Add Log Entry
   const addLog = (type: LogEntry['type'], message: string) => {
@@ -192,7 +340,7 @@ export default function App() {
       skipEmptyLines: true,
       complete: (results) => {
         if (results.data && results.data.length > 0) {
-          const headers = Object.keys(results.data[0]);
+          const headers = Object.keys(results.data[0] as object);
           setCsvHeaders(headers);
           
           // Cast data as array of records
@@ -582,6 +730,83 @@ export default function App() {
             <div className="card-title">
               <Mail size={20} />
               <span>2. Compose Email Template</span>
+            </div>
+
+            {/* Template Selector & Manager */}
+            <div className="form-group" style={{ 
+              background: 'rgba(255, 255, 255, 0.02)', 
+              padding: '1.25rem', 
+              borderRadius: '0.85rem', 
+              border: '1px solid var(--border-light)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              boxShadow: 'inset 0 1px 3px rgba(0, 0, 0, 0.2)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontWeight: '600', color: 'var(--text-primary)' }}>Template Presets</label>
+                {selectedTemplateId && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--secondary)' }}></span>
+                    Active template loaded
+                  </span>
+                )}
+              </div>
+              
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => handleLoadTemplate(e.target.value)}
+                  style={{ flex: 1, minWidth: '180px' }}
+                  disabled={sendingStatus === 'sending'}
+                >
+                  <option value="">-- Load/Select Template --</option>
+                  {templatesList.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.editorMode.toUpperCase()})</option>
+                  ))}
+                </select>
+
+                <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                  {selectedTemplateId && (
+                    <button 
+                      type="button"
+                      onClick={handleOverwriteTemplate} 
+                      className="btn btn-secondary" 
+                      title="Save current subject & body to this template"
+                      disabled={sendingStatus === 'sending'}
+                      style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderRadius: '0.6rem' }}
+                    >
+                      <Save size={14} />
+                      <span>Overwrite</span>
+                    </button>
+                  )}
+                  
+                  <button 
+                    type="button"
+                    onClick={handleSaveAsNewTemplate} 
+                    className="btn btn-primary"
+                    title="Save current layout as a new template"
+                    disabled={sendingStatus === 'sending'}
+                    style={{ padding: '0.5rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderRadius: '0.6rem' }}
+                  >
+                    <Plus size={14} />
+                    <span>Save As New</span>
+                  </button>
+
+                  {selectedTemplateId && (
+                    <button 
+                      type="button"
+                      onClick={handleDeleteTemplate} 
+                      className="btn btn-danger"
+                      title="Delete this template"
+                      disabled={sendingStatus === 'sending'}
+                      style={{ padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '0.6rem', boxShadow: 'none' }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="form-group">
