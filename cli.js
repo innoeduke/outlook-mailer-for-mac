@@ -191,13 +191,16 @@ async function run() {
       if (sendResult === 'SUCCESS') {
         successCount++;
         console.log(`${GREEN}Success${RESET}`);
+        logDeliveryAttempt(recipient, subject, body, 'success');
       } else {
         errorCount++;
         console.log(`${RED}Failed (${sendResult})${RESET}`);
+        logDeliveryAttempt(recipient, subject, body, 'failed', sendResult);
       }
     } catch (err) {
       errorCount++;
       console.log(`${RED}Failed Error: ${err.message}${RESET}`);
+      logDeliveryAttempt(recipient, subject, body, 'failed', err.message);
     }
 
     // Delay before next send
@@ -333,6 +336,58 @@ function inlineLocalImages(htmlContent, baseDir) {
   });
 
   return result;
+}
+
+// Generate timestamp-based workspace ID: YYYYMMDD_HHmmss_CLI
+function generateTimestampId() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const yyyy = now.getFullYear();
+  const mm = pad(now.getMonth() + 1);
+  const dd = pad(now.getDate());
+  const hh = pad(now.getHours());
+  const min = pad(now.getMinutes());
+  const ss = pad(now.getSeconds());
+  return `${yyyy}${mm}${dd}_${hh}${min}${ss}_CLI`;
+}
+
+const activeWorkspaceId = generateTimestampId();
+
+function logDeliveryAttempt(recipient, subject, body, status, errorMsg = null) {
+  const logsDir = path.join(process.cwd(), 'logs');
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+
+  const logFilePath = path.join(logsDir, `workspace_${activeWorkspaceId}.json`);
+
+  let logs = [];
+  if (fs.existsSync(logFilePath)) {
+    try {
+      logs = JSON.parse(fs.readFileSync(logFilePath, 'utf8'));
+    } catch (e) {
+      console.warn('Could not parse delivery log file, resetting it.');
+    }
+  }
+
+  const newEntry = {
+    id: `del_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    timestamp: new Date().toISOString(),
+    recipient,
+    subject,
+    body,
+    status,
+    error: errorMsg,
+    source: 'CLI'
+  };
+
+  logs.push(newEntry);
+
+  try {
+    fs.writeFileSync(logFilePath, JSON.stringify(logs, null, 2));
+  } catch (e) {
+    console.error('Error writing to delivery log file:', e.message);
+  }
 }
 
 run();
