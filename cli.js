@@ -190,8 +190,8 @@ async function run() {
       const sendResult = await sendEmailViaAppleScript(recipient, subject, body);
       if (sendResult === 'SUCCESS') {
         successCount++;
-        console.log(`${GREEN}Success${RESET}`);
-        logDeliveryAttempt(recipient, subject, body, 'success');
+        console.log(`${GREEN}Sent (Pending)${RESET}`);
+        logDeliveryAttempt(recipient, subject, body, 'pending');
       } else {
         errorCount++;
         console.log(`${RED}Failed (${sendResult})${RESET}`);
@@ -244,7 +244,7 @@ function sendEmailViaAppleScript(recipient, subject, body) {
   const appleScript = `
 tell application "Microsoft Outlook"
     try
-        set newMessage to make new outgoing message with properties {subject:"${escapedSubject}", content:"${escapedBody}"}
+        set newMessage to make new outgoing message with properties {subject:"${escapedSubject}", content:"${escapedBody}", has html:true}
         make new recipient at newMessage with properties {email address:{address:"${escapedRecipient}"}}
         send newMessage
         return "SUCCESS"

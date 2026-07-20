@@ -114,6 +114,13 @@ function cleanSubject(subject) {
     .trim();
 }
 
+// Basic syntax validation for email address format
+function isValidEmail(email) {
+  if (!email) return false;
+  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return regex.test(email);
+}
+
 // Helper to parse AppleScript dates robustly
 function parseAppleScriptDate(dateStr) {
   if (!dateStr) return new Date();
@@ -182,6 +189,11 @@ app.post('/api/send-email', async (req, res) => {
 
   const activeWorkspaceId = workspaceId || generateTimestampId();
 
+  if (!isValidEmail(recipient)) {
+    logDeliveryAttempt(activeWorkspaceId, recipient, subject, body, 'failed', 'Invalid email address format');
+    return res.status(400).json({ success: false, error: 'Invalid email address format', workspaceId: activeWorkspaceId });
+  }
+
   const escapedRecipient = escapeForAppleScript(recipient);
   const escapedSubject = escapeForAppleScript(subject);
   const escapedBody = escapeForAppleScript(body);
@@ -209,7 +221,7 @@ end tell
   try {
     const result = await runAppleScript(appleScript);
     if (result === 'SUCCESS') {
-      logDeliveryAttempt(activeWorkspaceId, recipient, subject, body, 'success');
+      logDeliveryAttempt(activeWorkspaceId, recipient, subject, body, 'pending');
       res.json({ success: true, workspaceId: activeWorkspaceId });
     } else {
       logDeliveryAttempt(activeWorkspaceId, recipient, subject, body, 'failed', result);
@@ -241,13 +253,15 @@ app.get('/api/workspaces', (req, res) => {
           const total = data.length;
           const successCount = data.filter(item => item.status === 'success').length;
           const errorCount = data.filter(item => item.status === 'failed').length;
+          const pendingCount = data.filter(item => item.status === 'pending').length;
           
           workspaces.push({
             id: workspaceId,
             createdAt: stats.birthtime || stats.mtime,
             total,
             successCount,
-            errorCount
+            errorCount,
+            pendingCount
           });
         } catch (err) {
           console.error(`Error parsing workspace log ${file}:`, err);
@@ -302,6 +316,15 @@ app.post('/api/workspaces/:workspaceId/retry', async (req, res) => {
     }
 
     const { recipient, subject, body } = logEntry;
+
+    if (!isValidEmail(recipient)) {
+      logEntry.status = 'failed';
+      logEntry.error = 'Invalid email address format';
+      logEntry.timestamp = new Date().toISOString();
+      results.push({ id, success: false, error: 'Invalid email address format' });
+      continue;
+    }
+
     const escapedRecipient = escapeForAppleScript(recipient);
     const escapedSubject = escapeForAppleScript(subject);
     const escapedBody = escapeForAppleScript(body);
@@ -322,7 +345,7 @@ end tell
     try {
       const result = await runAppleScript(appleScript);
       if (result === 'SUCCESS') {
-        logEntry.status = 'success';
+        logEntry.status = 'pending';
         logEntry.error = null;
         logEntry.timestamp = new Date().toISOString();
         results.push({ id, success: true });
@@ -457,6 +480,10 @@ end tell
     const lines = rawResult.split('\\n').map(l => l.trim()).filter(Boolean);
     const logs = getDeliveryLogs(workspaceId);
     let newEntriesCount = 0;
+    let updatedEntriesCount = 0;
+
+    const bounces = [];
+    const outboxItems = [];
 
     for (const line of lines) {
       const parts = line.split('||');
@@ -466,7 +493,7 @@ end tell
         
         let recipient = '';
         if (content) {
-          const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
+          const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
           const foundEmails = content.match(emailRegex) || [];
           const filteredEmails = foundEmails.filter(email => 
             !/daemon|postmaster|system|admin/i.test(email) && 
@@ -477,7 +504,7 @@ end tell
           }
         }
         
-        const matchingLog = logs.find(l => cleanSubject(l.subject) === origSubject);
+        const matchingLog = logs.find(l => cleanSubject(l.subject).toLowerCase() === origSubject.toLowerCase());
         if (matchingLog && !recipient) {
           recipient = matchingLog.recipient;
         }
@@ -486,83 +513,134 @@ end tell
           recipient = 'Unknown Recipient';
         }
 
+        bounces.push({
+          msgId,
+          recipient,
+          origSubject,
+          subject,
+          senderName,
+          senderAddr,
+          dateStr,
+          content
+        });
+      } else if (parts[0] === 'OUTBOX') {
+        const [_, msgId, subject, recipientsStr, dateStr] = parts;
+        const recipients = recipientsStr ? recipientsStr.split(',').map(r => r.trim()) : ['Unknown Recipient'];
+        for (const recipient of recipients) {
+          outboxItems.push({
+            msgId,
+            recipient,
+            subject,
+            dateStr
+          });
+        }
+      }
+    }
+
+    // Process bounces
+    for (const bounce of bounces) {
+      const matchingLogs = logs.filter(l => 
+        l.recipient.toLowerCase() === bounce.recipient.toLowerCase() &&
+        cleanSubject(l.subject).toLowerCase() === bounce.origSubject.toLowerCase()
+      );
+
+      const logsToFail = matchingLogs.filter(l => l.status === 'pending' || l.status === 'success');
+      
+      if (logsToFail.length > 0) {
+        for (const l of logsToFail) {
+          l.status = 'failed';
+          l.error = `Outlook Bounce: ${bounce.subject} (${bounce.senderName})`;
+          l.timestamp = parseAppleScriptDate(bounce.dateStr).toISOString();
+          updatedEntriesCount++;
+        }
+      } else {
         const duplicate = logs.find(l => 
-          l.recipient === recipient && 
-          cleanSubject(l.subject) === origSubject && 
+          l.recipient.toLowerCase() === bounce.recipient.toLowerCase() && 
+          cleanSubject(l.subject).toLowerCase() === bounce.origSubject.toLowerCase() && 
           l.status === 'failed' &&
           (l.error && l.error.includes('Outlook Bounce'))
         );
 
         if (!duplicate) {
-          const successLog = logs.find(l => 
-            l.recipient === recipient && 
-            cleanSubject(l.subject) === origSubject && 
-            l.status === 'success'
-          );
-
-          if (successLog) {
-            successLog.status = 'failed';
-            successLog.error = `Outlook Bounce: ${subject} (${senderName})`;
-            successLog.timestamp = parseAppleScriptDate(dateStr).toISOString();
-          } else {
-            logs.push({
-              id: `del_sync_${msgId}`,
-              timestamp: parseAppleScriptDate(dateStr).toISOString(),
-              recipient,
-              subject: origSubject || subject,
-              body: `Bounce notification body: ${content || 'No text content available'}`,
-              status: 'failed',
-              error: `Outlook Bounce: ${subject} (${senderName})`,
-              source: 'Outlook Sync'
-            });
-          }
+          logs.push({
+            id: `del_sync_${bounce.msgId}`,
+            timestamp: parseAppleScriptDate(bounce.dateStr).toISOString(),
+            recipient: bounce.recipient,
+            subject: bounce.origSubject || bounce.subject,
+            body: `Bounce notification body: ${bounce.content || 'No text content available'}`,
+            status: 'failed',
+            error: `Outlook Bounce: ${bounce.subject} (${bounce.senderName})`,
+            source: 'Outlook Sync'
+          });
           newEntriesCount++;
-        }
-      } else if (parts[0] === 'OUTBOX') {
-        const [_, msgId, subject, recipientsStr, dateStr] = parts;
-        const recipients = recipientsStr ? recipientsStr.split(',').map(r => r.trim()) : ['Unknown Recipient'];
-
-        for (const recipient of recipients) {
-          const duplicate = logs.find(l => 
-            l.recipient === recipient && 
-            cleanSubject(l.subject) === cleanSubject(subject) && 
-            l.status === 'failed' && 
-            l.error === 'Stuck in Outlook Outbox'
-          );
-
-          if (!duplicate) {
-            const successLog = logs.find(l => 
-              l.recipient === recipient && 
-              cleanSubject(l.subject) === cleanSubject(subject) && 
-              l.status === 'success'
-            );
-
-            if (successLog) {
-              successLog.status = 'failed';
-              successLog.error = 'Stuck in Outlook Outbox';
-            } else {
-              logs.push({
-                id: `del_sync_${msgId}_${recipient}`,
-                timestamp: parseAppleScriptDate(dateStr).toISOString(),
-                recipient,
-                subject,
-                body: 'Email stuck in Outlook Outbox.',
-                status: 'failed',
-                error: 'Stuck in Outlook Outbox',
-                source: 'Outlook Sync'
-              });
-            }
-            newEntriesCount++;
-          }
         }
       }
     }
 
-    if (newEntriesCount > 0) {
+    // Process outbox items
+    for (const item of outboxItems) {
+      const matchingLogs = logs.filter(l => 
+        l.recipient.toLowerCase() === item.recipient.toLowerCase() &&
+        cleanSubject(l.subject).toLowerCase() === cleanSubject(item.subject).toLowerCase()
+      );
+
+      const logsToPending = matchingLogs.filter(l => l.status === 'success' || (l.status === 'pending' && l.error !== 'In Outlook Outbox'));
+
+      if (logsToPending.length > 0) {
+        for (const l of logsToPending) {
+          l.status = 'pending';
+          l.error = 'In Outlook Outbox';
+          updatedEntriesCount++;
+        }
+      } else if (matchingLogs.length === 0) {
+        const duplicate = logs.find(l => 
+          l.recipient.toLowerCase() === item.recipient.toLowerCase() && 
+          cleanSubject(l.subject).toLowerCase() === cleanSubject(item.subject).toLowerCase() && 
+          l.status === 'pending' && 
+          l.error === 'In Outlook Outbox'
+        );
+
+        if (!duplicate) {
+          logs.push({
+            id: `del_sync_${item.msgId}_${item.recipient}`,
+            timestamp: parseAppleScriptDate(item.dateStr).toISOString(),
+            recipient: item.recipient,
+            subject: item.subject,
+            body: 'Email stuck in Outlook Outbox.',
+            status: 'pending',
+            error: 'In Outlook Outbox',
+            source: 'Outlook Sync'
+          });
+          newEntriesCount++;
+        }
+      }
+    }
+
+    // Update remaining pending logs that are not bounced and not in outbox to 'success'
+    for (const l of logs) {
+      if (l.status === 'pending') {
+        const isBounced = bounces.some(b => 
+          b.recipient.toLowerCase() === l.recipient.toLowerCase() &&
+          cleanSubject(b.subject).toLowerCase() === cleanSubject(l.subject).toLowerCase()
+        );
+        const isInOutbox = outboxItems.some(item => 
+          item.recipient.toLowerCase() === l.recipient.toLowerCase() &&
+          cleanSubject(item.subject).toLowerCase() === cleanSubject(l.subject).toLowerCase()
+        );
+
+        if (!isBounced && !isInOutbox) {
+          l.status = 'success';
+          l.error = null;
+          updatedEntriesCount++;
+        }
+      }
+    }
+
+    if (newEntriesCount > 0 || updatedEntriesCount > 0) {
       saveDeliveryLogs(workspaceId, logs);
     }
     
-    res.json({ success: true, count: newEntriesCount, logs: getDeliveryLogs(workspaceId) });
+    res.json({ success: true, count: newEntriesCount + updatedEntriesCount, logs: getDeliveryLogs(workspaceId) });
   } catch (error) {
     console.error('Error syncing Outlook:', error);
     res.status(500).json({ error: error.message });

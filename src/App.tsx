@@ -157,7 +157,7 @@ export default function App() {
   // Navigation & Delivery History
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history'>('dashboard');
   const [historyLogs, setHistoryLogs] = useState<any[]>([]);
-  const [historyFilter, setHistoryFilter] = useState<'all' | 'success' | 'failed'>('all');
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all');
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   const [isSyncingOutlook, setIsSyncingOutlook] = useState<boolean>(false);
   const [selectedLogForDetail, setSelectedLogForDetail] = useState<any | null>(null);
@@ -170,6 +170,7 @@ export default function App() {
     total: number;
     successCount: number;
     errorCount: number;
+    pendingCount?: number;
   }
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string>('');
   const [workspacesList, setWorkspacesList] = useState<WorkspaceSummary[]>([]);
@@ -1509,7 +1510,7 @@ export default function App() {
               ) : (
                 workspacesList.map(ws => (
                   <option key={ws.id} value={ws.id}>
-                    {formatWorkspaceName(ws.id)} (Total: {ws.total} | Success: {ws.successCount} | Failed: {ws.errorCount})
+                    {formatWorkspaceName(ws.id)} (Total: {ws.total} | Pending: {ws.pendingCount || 0} | Success: {ws.successCount} | Failed: {ws.errorCount})
                   </option>
                 ))
               )}
@@ -1565,11 +1566,39 @@ export default function App() {
             </div>
           </div>
 
+          {/* Explanation Banner */}
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.06)',
+            border: '1px solid rgba(59, 130, 246, 0.2)',
+            borderRadius: '0.75rem',
+            padding: '0.85rem 1.25rem',
+            marginBottom: '1rem',
+            fontSize: '0.85rem',
+            color: 'var(--text-primary)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.75rem',
+            lineHeight: '1.4'
+          }}>
+            <span style={{ fontSize: '1.1rem', marginTop: '-0.1rem' }}>ℹ️</span>
+            <div>
+              <strong style={{ color: '#60a5fa', display: 'block', marginBottom: '0.15rem' }}>Asynchronous Delivery Note</strong>
+              Emails are sent via Microsoft Outlook's local Outbox. The initial status 
+              of <span className="badge badge-success" style={{ padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}>Succeeded</span> indicates that the message was successfully handed off to Outlook. 
+              To scan for real-time delivery bounces (e.g., invalid mailboxes or non-existent domains) or stuck outbox messages, click 
+              the <strong style={{ color: '#60a5fa' }}>Sync Outlook</strong> button above.
+            </div>
+          </div>
+
           {/* Delivery Stats Bar */}
-          <div className="history-stats-bar" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', margin: '0.5rem 0 1.5rem 0' }}>
+          <div className="history-stats-bar" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1rem', margin: '0.5rem 0 1.5rem 0' }}>
             <div className="stat-box all" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-light)', padding: '1rem', borderRadius: '0.75rem', textAlign: 'center' }}>
               <div className="stat-title" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Total Attempts</div>
               <div className="stat-value" style={{ fontSize: '1.75rem', fontWeight: '700', color: 'var(--text-primary)', marginTop: '0.25rem' }}>{historyLogs.length}</div>
+            </div>
+            <div className="stat-box pending" style={{ background: 'rgba(245, 158, 11, 0.03)', border: '1px solid rgba(245, 158, 11, 0.15)', padding: '1rem', borderRadius: '0.75rem', textAlign: 'center' }}>
+              <div className="stat-title" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Pending</div>
+              <div className="stat-value" style={{ fontSize: '1.75rem', fontWeight: '700', color: '#fbbf24', marginTop: '0.25rem' }}>{historyLogs.filter(l => l.status === 'pending').length}</div>
             </div>
             <div className="stat-box success" style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '1rem', borderRadius: '0.75rem', textAlign: 'center' }}>
               <div className="stat-title" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Valid (Succeeded)</div>
@@ -1590,6 +1619,13 @@ export default function App() {
                 style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem', borderRadius: '0.35rem', boxShadow: 'none' }}
               >
                 All
+              </button>
+              <button 
+                onClick={() => setHistoryFilter('pending')} 
+                className={`btn ${historyFilter === 'pending' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem', borderRadius: '0.35rem', boxShadow: 'none' }}
+              >
+                Pending
               </button>
               <button 
                 onClick={() => setHistoryFilter('success')} 
@@ -1657,6 +1693,7 @@ export default function App() {
                           const filtered = historyLogs.filter(log => {
                             if (historyFilter === 'success') return log.status === 'success';
                             if (historyFilter === 'failed') return log.status === 'failed';
+                            if (historyFilter === 'pending') return log.status === 'pending';
                             return true;
                           }).filter(log => 
                             log.recipient.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -1669,6 +1706,7 @@ export default function App() {
                         const filtered = historyLogs.filter(log => {
                           if (historyFilter === 'success') return log.status === 'success';
                           if (historyFilter === 'failed') return log.status === 'failed';
+                          if (historyFilter === 'pending') return log.status === 'pending';
                           return true;
                         }).filter(log => 
                           log.recipient.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -1702,6 +1740,7 @@ export default function App() {
                   const filtered = historyLogs.filter(log => {
                     if (historyFilter === 'success') return log.status === 'success';
                     if (historyFilter === 'failed') return log.status === 'failed';
+                    if (historyFilter === 'pending') return log.status === 'pending';
                     return true;
                   }).filter(log => 
                     log.recipient.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -1749,11 +1788,11 @@ export default function App() {
                       </td>
                       <td style={{ padding: '1rem' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                          <span className={`badge ${log.status === 'success' ? 'badge-success' : 'badge-danger'}`} style={{ padding: '0.25rem 0.6rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: '600', width: 'fit-content' }}>
-                            {log.status === 'success' ? 'Succeeded' : 'Failed'}
+                          <span className={`badge ${log.status === 'success' ? 'badge-success' : log.status === 'pending' ? 'badge-warning' : 'badge-danger'}`} style={{ padding: '0.25rem 0.6rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: '600', width: 'fit-content' }}>
+                            {log.status === 'success' ? 'Succeeded' : log.status === 'pending' ? 'Pending' : 'Failed'}
                           </span>
-                          {log.status === 'failed' && log.error && (
-                            <span style={{ fontSize: '0.75rem', color: 'var(--error)', maxWidth: '200px', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={log.error}>
+                          {log.status !== 'success' && log.error && (
+                            <span style={{ fontSize: '0.75rem', color: log.status === 'pending' ? '#fbbf24' : 'var(--error)', maxWidth: '200px', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={log.error}>
                               {log.error}
                             </span>
                           )}
@@ -1821,15 +1860,15 @@ export default function App() {
             <div className="drawer-body">
               <div className="detail-row">
                 <span className="detail-label">Status</span>
-                <span className={`badge ${selectedLogForDetail.status === 'success' ? 'badge-success' : 'badge-danger'}`}>
-                  {selectedLogForDetail.status === 'success' ? 'Succeeded (Valid)' : 'Failed (Invalid)'}
+                <span className={`badge ${selectedLogForDetail.status === 'success' ? 'badge-success' : selectedLogForDetail.status === 'pending' ? 'badge-warning' : 'badge-danger'}`}>
+                  {selectedLogForDetail.status === 'success' ? 'Succeeded (Valid)' : selectedLogForDetail.status === 'pending' ? 'Pending' : 'Failed (Invalid)'}
                 </span>
               </div>
 
               {selectedLogForDetail.error && (
                 <div style={{
-                  background: 'rgba(244, 63, 94, 0.08)',
-                  border: '1px solid var(--error)',
+                  background: selectedLogForDetail.status === 'pending' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(244, 63, 94, 0.08)',
+                  border: selectedLogForDetail.status === 'pending' ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid var(--error)',
                   borderRadius: '0.5rem',
                   padding: '0.75rem',
                   marginBottom: '1.25rem',
@@ -1839,7 +1878,9 @@ export default function App() {
                   flexDirection: 'column',
                   gap: '0.25rem'
                 }}>
-                  <strong style={{ color: 'var(--error)' }}>Error Message:</strong>
+                  <strong style={{ color: selectedLogForDetail.status === 'pending' ? '#fbbf24' : 'var(--error)' }}>
+                    {selectedLogForDetail.status === 'pending' ? 'Status Details:' : 'Error Message:'}
+                  </strong>
                   <span>{selectedLogForDetail.error}</span>
                 </div>
               )}
